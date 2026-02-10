@@ -67,6 +67,7 @@ export default function Auth() {
             </Text>
           </div>
           <Form action="/auth/google" method="post">
+            <input type="hidden" name="shop" value={shop} />
             <div style={{ marginTop: "1rem" }}>
               <Button submit fullWidth>Sign in with Google</Button>
             </div>

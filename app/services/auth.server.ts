@@ -1,6 +1,7 @@
 import { Authenticator } from "remix-auth";
 import { GoogleStrategy } from "remix-auth-google";
 import { sessionStorage } from "../session.server";
+import shopify from "../shopify.server";
 
 // Create an instance of the authenticator, pass a generic with what
 // strategies will return and will store in the session
@@ -20,10 +21,61 @@ const googleStrategy = new GoogleStrategy(
         callbackURL: process.env.GOOGLE_CALLBACK_URL || "http://localhost:3000/auth/google/callback",
     },
     async ({ accessToken, refreshToken, extraParams, profile }) => {
-        // Get the user data from your DB or API using the tokens and profile
+        const email = profile.emails[0].value;
+        const nameData = profile.name || { givenName: profile.displayName, familyName: "" };
+
+        try {
+            // Use the custom domain from env or a default for your testing
+            const shop = process.env.SHOP_CUSTOM_DOMAIN || "soni-147327.myshopify.com";
+            const { admin } = await shopify.unauthenticated.admin(shop);
+
+            // Check if customer exists
+            const response = await admin.graphql(
+                `#graphql
+                query findCustomer($query: String!) {
+                  customers(first: 1, query: $query) {
+                    edges {
+                      node {
+                        id
+                      }
+                    }
+                  }
+                }`,
+                { variables: { query: `email:${email}` } }
+            );
+
+            const result = await response.json();
+            const existingCustomer = result.data?.customers?.edges?.[0];
+
+            if (!existingCustomer) {
+                // Create new customer
+                await admin.graphql(
+                    `#graphql
+                    mutation customerCreate($input: CustomerInput!) {
+                      customerCreate(input: $input) {
+                        customer { id }
+                        userErrors { field message }
+                      }
+                    }`,
+                    {
+                        variables: {
+                            input: {
+                                email,
+                                firstName: nameData.givenName,
+                                lastName: nameData.familyName,
+                                note: "Created via Google Login App",
+                            },
+                        },
+                    }
+                );
+            }
+        } catch (err) {
+            console.error("Failed to sync Shopify customer:", err);
+        }
+
         return {
             id: profile.id,
-            email: profile.emails[0].value,
+            email,
             name: profile.displayName,
             accessToken,
         };
